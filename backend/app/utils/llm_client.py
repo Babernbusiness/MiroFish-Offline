@@ -1,12 +1,13 @@
 """
 LLM Client Wrapper
 Unified OpenAI format API calls
-Supports Ollama num_ctx parameter to prevent prompt truncation
+For Ollama: uses native /api/chat endpoint to support think:false and num_ctx
 """
 
 import json
 import os
 import re
+import requests
 from typing import Optional, Dict, Any, List
 from openai import OpenAI
 
@@ -35,6 +36,7 @@ class LLMClient:
             base_url=self.base_url,
             timeout=timeout,
         )
+        self._timeout = timeout
 
         # Ollama context window size — prevents prompt truncation.
         # Read from env OLLAMA_NUM_CTX, default 8192 (Ollama default is only 2048).
@@ -43,6 +45,43 @@ class LLMClient:
     def _is_ollama(self) -> bool:
         """Check if we're talking to an Ollama server."""
         return '11434' in (self.base_url or '')
+
+    def _ollama_base_url(self) -> str:
+        """Get the native Ollama base URL (strip /v1 suffix if present)."""
+        base = (self.base_url or '').rstrip('/')
+        if base.endswith('/v1'):
+            base = base[:-3]
+        return base
+
+    def _chat_ollama_native(
+        self,
+        messages: List[Dict[str, str]],
+        temperature: float,
+        max_tokens: int,
+        use_json_format: bool,
+    ) -> str:
+        """
+        Call Ollama native /api/chat endpoint.
+        Supports think:false and num_ctx — both ignored by the OpenAI compat layer.
+        """
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "stream": False,
+            "think": False,
+            "options": {
+                "num_ctx": self._num_ctx,
+                "num_predict": max_tokens,
+                "temperature": temperature,
+            },
+        }
+        if use_json_format:
+            payload["format"] = "json"
+
+        url = f"{self._ollama_base_url()}/api/chat"
+        resp = requests.post(url, json=payload, timeout=self._timeout)
+        resp.raise_for_status()
+        return resp.json()["message"]["content"]
 
     def chat(
         self,
@@ -63,21 +102,19 @@ class LLMClient:
         Returns:
             Model response text
         """
+        use_json = bool(response_format and response_format.get("type") == "json_object")
+
+        if self._is_ollama():
+            return self._chat_ollama_native(messages, temperature, max_tokens, use_json)
+
         kwargs = {
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-
         if response_format:
             kwargs["response_format"] = response_format
-
-        # For Ollama: pass num_ctx via extra_body to prevent prompt truncation
-        if self._is_ollama() and self._num_ctx:
-            kwargs["extra_body"] = {
-                "options": {"num_ctx": self._num_ctx}
-            }
 
         response = self.client.chat.completions.create(**kwargs)
         content = response.choices[0].message.content

@@ -27,10 +27,17 @@ class Config:
     # JSON configuration - disable ASCII escaping to display Chinese directly (not as \uXXXX)
     JSON_AS_ASCII = False
 
-    # LLM configuration (unified OpenAI format)
+    # LLM configuration (unified OpenAI format) — used by all pipeline services
     LLM_API_KEY = os.environ.get('LLM_API_KEY')
     LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')
     LLM_MODEL_NAME = os.environ.get('LLM_MODEL_NAME', 'qwen2.5:32b')
+
+    # Simulation-specific LLM — used by OASIS agents during simulation.
+    # Defaults to the main LLM_* values so existing setups need no changes.
+    # Set these to a lighter/faster model when using a heavy pipeline model.
+    SIMULATION_LLM_API_KEY = os.environ.get('SIMULATION_LLM_API_KEY') or os.environ.get('LLM_API_KEY')
+    SIMULATION_LLM_BASE_URL = os.environ.get('SIMULATION_LLM_BASE_URL') or os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')
+    SIMULATION_LLM_MODEL = os.environ.get('SIMULATION_LLM_MODEL') or os.environ.get('LLM_MODEL_NAME', 'qwen2.5:32b')
 
     # Neo4j configuration
     NEO4J_URI = os.environ.get('NEO4J_URI', 'bolt://localhost:7687')

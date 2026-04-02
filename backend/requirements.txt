@@ -11,12 +11,12 @@ flask-cors>=6.0.0
 
 # ============= LLM 相关 =============
 # OpenAI SDK（统一使用 OpenAI 格式调用 LLM / Ollama）
-openai>=1.0.0
+openai>=1.86.0
 # HTTP client for Ollama embedding API
-requests>=2.28.0
+requests>=2.33.0
 
 # ============= Neo4j Graph Database =============
-neo4j>=5.15.0
+neo4j>=5.23.0
 
 # ============= OASIS 社交媒体模拟 =============
 # OASIS 社交模拟框架

@@ -16,10 +16,9 @@ from typing import Dict, Any, List, Optional, Callable
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
 
-from openai import OpenAI
-
 from ..config import Config
 from ..utils.logger import get_logger
+from ..utils.llm_client import LLMClient
 from .entity_reader import EntityNode
 
 logger = get_logger('mirofish.simulation_config')
@@ -227,17 +226,10 @@ class SimulationConfigGenerator:
         base_url: Optional[str] = None,
         model_name: Optional[str] = None
     ):
-        self.api_key = api_key or Config.LLM_API_KEY
-        self.base_url = base_url or Config.LLM_BASE_URL
         self.model_name = model_name or Config.LLM_MODEL_NAME
 
-        if not self.api_key:
-            raise ValueError("LLM_API_KEY not configured")
-
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url
-        )
+        # Use LLMClient so Ollama native endpoint is used (think:false, proper timeout)
+        self.llm = LLMClient(api_key=api_key, base_url=base_url, model=model_name)
     
     def generate_config(
         self,
@@ -368,8 +360,9 @@ class SimulationConfigGenerator:
             event_config=event_config,
             twitter_config=twitter_config,
             reddit_config=reddit_config,
-            llm_model=self.model_name,
-            llm_base_url=self.base_url,
+            # Store the simulation-specific model so scripts can use it as fallback
+            llm_model=Config.SIMULATION_LLM_MODEL,
+            llm_base_url=Config.SIMULATION_LLM_BASE_URL,
             generation_reasoning=" | ".join(reasoning_parts)
         )
         
@@ -431,46 +424,20 @@ class SimulationConfigGenerator:
         return "\n".join(lines)
     
     def _call_llm_with_retry(self, prompt: str, system_prompt: str) -> Dict[str, Any]:
-        """LLM call with retry, including JSON repair logic"""
-        import re
-
+        """LLM call with retry. Uses LLMClient (native Ollama endpoint, think:false)."""
         max_attempts = 3
         last_error = None
 
         for attempt in range(max_attempts):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model_name,
+                return self.llm.chat_json(
                     messages=[
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt}
                     ],
-                    response_format={"type": "json_object"},
-                    temperature=0.7 - (attempt * 0.1)  # Lower temperature with each retry
-                    # Don't set max_tokens, let LLM generate freely
+                    temperature=0.7 - (attempt * 0.1),
+                    max_tokens=4096,
                 )
-
-                content = response.choices[0].message.content
-                finish_reason = response.choices[0].finish_reason
-
-                # Check if output was truncated
-                if finish_reason == 'length':
-                    logger.warning(f"LLM output truncated (attempt {attempt+1})")
-                    content = self._fix_truncated_json(content)
-
-                # Try to parse JSON
-                try:
-                    return json.loads(content)
-                except json.JSONDecodeError as e:
-                    logger.warning(f"JSON parsing failed (attempt {attempt+1}): {str(e)[:80]}")
-
-                    # Try to fix JSON
-                    fixed = self._try_fix_config_json(content)
-                    if fixed:
-                        return fixed
-
-                    last_error = e
-
             except Exception as e:
                 logger.warning(f"LLM call failed (attempt {attempt+1}): {str(e)[:80]}")
                 last_error = e
@@ -478,58 +445,6 @@ class SimulationConfigGenerator:
                 time.sleep(2 * (attempt + 1))
 
         raise last_error or Exception("LLM call failed")
-    
-    def _fix_truncated_json(self, content: str) -> str:
-        """Fix truncated JSON"""
-        content = content.strip()
-
-        # Count unclosed parentheses
-        open_braces = content.count('{') - content.count('}')
-        open_brackets = content.count('[') - content.count(']')
-
-        # Check for unclosed strings
-        if content and content[-1] not in '",}]':
-            content += '"'
-
-        # Close parentheses
-        content += ']' * open_brackets
-        content += '}' * open_braces
-
-        return content
-
-    def _try_fix_config_json(self, content: str) -> Optional[Dict[str, Any]]:
-        """Try to fix configuration JSON"""
-        import re
-
-        # Fix truncated case
-        content = self._fix_truncated_json(content)
-
-        # Extract JSON portion
-        json_match = re.search(r'\{[\s\S]*\}', content)
-        if json_match:
-            json_str = json_match.group()
-
-            # Remove newlines in strings
-            def fix_string(match):
-                s = match.group(0)
-                s = s.replace('\n', ' ').replace('\r', ' ')
-                s = re.sub(r'\s+', ' ', s)
-                return s
-
-            json_str = re.sub(r'"[^"\\]*(?:\\.[^"\\]*)*"', fix_string, json_str)
-
-            try:
-                return json.loads(json_str)
-            except:
-                # Try removing all control characters
-                json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', json_str)
-                json_str = re.sub(r'\s+', ' ', json_str)
-                try:
-                    return json.loads(json_str)
-                except:
-                    pass
-
-        return None
     
     def _generate_time_config(self, context: str, num_entities: int) -> Dict[str, Any]:
         """Generate time configuration"""

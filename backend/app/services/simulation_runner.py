@@ -434,6 +434,16 @@ class SimulationRunner:
             env = os.environ.copy()
             env['PYTHONUTF8'] = '1'  # Python 3.7+ support, make all open() use UTF-8 by default
             env['PYTHONIOENCODING'] = 'utf-8'  # Ensure stdout/stderr use UTF-8
+
+            # Override LLM vars for OASIS subprocess with simulation-specific model.
+            # This lets the pipeline use a heavy model (e.g. MiniMax) while agents
+            # during simulation use a lighter/faster local model.
+            env['LLM_API_KEY'] = Config.SIMULATION_LLM_API_KEY or ''
+            env['LLM_BASE_URL'] = Config.SIMULATION_LLM_BASE_URL
+            env['LLM_MODEL_NAME'] = Config.SIMULATION_LLM_MODEL
+            # CAMEL-AI reads OPENAI_* vars directly
+            env['OPENAI_API_KEY'] = Config.SIMULATION_LLM_API_KEY or ''
+            env['OPENAI_API_BASE_URL'] = Config.SIMULATION_LLM_BASE_URL
             
             # Set working directory to simulation directory (database files etc. will be generated here)
             # Use start_new_session=True to create new process group, ensuring all child processes can be terminated via os.killpg

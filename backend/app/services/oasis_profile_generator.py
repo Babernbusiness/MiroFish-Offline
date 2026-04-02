@@ -15,19 +15,19 @@ from typing import Dict, Any, List, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from openai import OpenAI
-
 from ..config import Config
 from ..utils.logger import get_logger
+from ..utils.llm_client import LLMClient
 from .entity_reader import EntityNode
 from ..storage import GraphStorage
 
-logger = get_logger('mirofish.oasis_profile')
+logger = get_logger("mirofish.oasis_profile")
 
 
 @dataclass
 class OasisAgentProfile:
     """OASIS Agent Profile data structure"""
+
     # Common fields
     user_id: int
     user_name: str
@@ -54,9 +54,9 @@ class OasisAgentProfile:
     # Source entity information
     source_entity_uuid: Optional[str] = None
     source_entity_type: Optional[str] = None
-    
+
     created_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d"))
-    
+
     def to_reddit_format(self) -> Dict[str, Any]:
         """Convert to Reddit platform format"""
         profile = {
@@ -82,9 +82,9 @@ class OasisAgentProfile:
             profile["profession"] = self.profession
         if self.interested_topics:
             profile["interested_topics"] = self.interested_topics
-        
+
         return profile
-    
+
     def to_twitter_format(self) -> Dict[str, Any]:
         """Convert to Twitter platform format"""
         profile = {
@@ -112,9 +112,9 @@ class OasisAgentProfile:
             profile["profession"] = self.profession
         if self.interested_topics:
             profile["interested_topics"] = self.interested_topics
-        
+
         return profile
-    
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to complete dictionary format"""
         return {
@@ -153,59 +153,108 @@ class OasisProfileGenerator:
 
     # MBTI types list
     MBTI_TYPES = [
-        "INTJ", "INTP", "ENTJ", "ENTP",
-        "INFJ", "INFP", "ENFJ", "ENFP",
-        "ISTJ", "ISFJ", "ESTJ", "ESFJ",
-        "ISTP", "ISFP", "ESTP", "ESFP"
+        "INTJ",
+        "INTP",
+        "ENTJ",
+        "ENTP",
+        "INFJ",
+        "INFP",
+        "ENFJ",
+        "ENFP",
+        "ISTJ",
+        "ISFJ",
+        "ESTJ",
+        "ESFJ",
+        "ISTP",
+        "ISFP",
+        "ESTP",
+        "ESFP",
     ]
 
     # Common countries list
     COUNTRIES = [
-        "US", "UK", "Japan", "Germany", "France",
-        "Canada", "Australia", "Brazil", "India", "South Korea"
+        "US",
+        "UK",
+        "Japan",
+        "Germany",
+        "France",
+        "Canada",
+        "Australia",
+        "Brazil",
+        "India",
+        "South Korea",
     ]
 
     # Individual type entities (need to generate specific personas)
     INDIVIDUAL_ENTITY_TYPES = [
-        "student", "alumni", "professor", "person", "publicfigure",
-        "expert", "faculty", "official", "journalist", "activist"
+        "student",
+        "alumni",
+        "professor",
+        "person",
+        "publicfigure",
+        "expert",
+        "faculty",
+        "official",
+        "journalist",
+        "activist",
+        "politicalleader",
+        "politician",
+        "diplomat",
+        "academic",
+        "researcher",
+        "scientist",
+        "artist",
+        "athlete",
+        "businessperson",
+        "lawyer",
+        "doctor",
+        "engineer",
+        "teacher",
+        "activist",
+        "influencer",
     ]
 
     # Group/institutional type entities (need to generate group representative personas)
     GROUP_ENTITY_TYPES = [
-        "university", "governmentagency", "organization", "ngo",
-        "mediaoutlet", "company", "institution", "group", "community"
+        "university",
+        "governmentagency",
+        "organization",
+        "ngo",
+        "mediaoutlet",
+        "company",
+        "institution",
+        "group",
+        "community",
+        "politicalparty",
+        "government",
+        "agency",
+        "media",
+        "platform",
     ]
-    
+
     def __init__(
         self,
         api_key: Optional[str] = None,
         base_url: Optional[str] = None,
         model_name: Optional[str] = None,
         storage: Optional[GraphStorage] = None,
-        graph_id: Optional[str] = None
+        graph_id: Optional[str] = None,
     ):
-        self.api_key = api_key or Config.LLM_API_KEY
-        self.base_url = base_url or Config.LLM_BASE_URL
         self.model_name = model_name or Config.LLM_MODEL_NAME
 
-        if not self.api_key:
-            raise ValueError("LLM_API_KEY not configured")
-
-        self.client = OpenAI(
-            api_key=self.api_key,
-            base_url=self.base_url
+        # Use LLMClient so Ollama native endpoint is used (think:false, proper timeout)
+        self.llm = LLMClient(
+            api_key=api_key,
+            base_url=base_url,
+            model=model_name,
         )
 
         # GraphStorage for hybrid search enrichment
         self.storage = storage
         self.graph_id = graph_id
-    
+
     def generate_profile_from_entity(
-        self,
-        entity: EntityNode,
-        user_id: int,
-        use_llm: bool = True
+        self, entity: EntityNode, user_id: int, use_llm: bool = True
     ) -> OasisAgentProfile:
         """
         Generate OASIS Agent Profile from knowledge graph entity
@@ -226,7 +275,7 @@ class OasisProfileGenerator:
 
         # Build context information
         context = self._build_entity_context(entity)
-        
+
         if use_llm:
             # Use LLM to generate detailed persona
             profile_data = self._generate_profile_with_llm(
@@ -234,7 +283,7 @@ class OasisProfileGenerator:
                 entity_type=entity_type,
                 entity_summary=entity.summary,
                 entity_attributes=entity.attributes,
-                context=context
+                context=context,
             )
         else:
             # Use rules to generate basic persona
@@ -242,19 +291,25 @@ class OasisProfileGenerator:
                 entity_name=name,
                 entity_type=entity_type,
                 entity_summary=entity.summary,
-                entity_attributes=entity.attributes
+                entity_attributes=entity.attributes,
             )
-        
+
         return OasisAgentProfile(
             user_id=user_id,
             user_name=user_name,
             name=name,
             bio=profile_data.get("bio", f"{entity_type}: {name}"),
-            persona=profile_data.get("persona", entity.summary or f"A {entity_type} named {name}."),
+            persona=profile_data.get(
+                "persona", entity.summary or f"A {entity_type} named {name}."
+            ),
             karma=profile_data.get("karma", random.randint(500, 5000)),
             friend_count=profile_data.get("friend_count", random.randint(50, 500)),
-            follower_count=profile_data.get("follower_count", random.randint(100, 1000)),
-            statuses_count=profile_data.get("statuses_count", random.randint(100, 2000)),
+            follower_count=profile_data.get(
+                "follower_count", random.randint(100, 1000)
+            ),
+            statuses_count=profile_data.get(
+                "statuses_count", random.randint(100, 2000)
+            ),
             age=profile_data.get("age"),
             gender=profile_data.get("gender"),
             mbti=profile_data.get("mbti"),
@@ -264,17 +319,17 @@ class OasisProfileGenerator:
             source_entity_uuid=entity.uuid,
             source_entity_type=entity_type,
         )
-    
+
     def _generate_username(self, name: str) -> str:
         """Generate username"""
         # Remove special characters, convert to lowercase
         username = name.lower().replace(" ", "_")
-        username = ''.join(c for c in username if c.isalnum() or c == '_')
+        username = "".join(c for c in username if c.isalnum() or c == "_")
 
         # Add random suffix to avoid duplicates
         suffix = random.randint(100, 999)
         return f"{username}_{suffix}"
-    
+
     def _search_graph_for_entity(self, entity: EntityNode) -> Dict[str, Any]:
         """
         Use GraphStorage hybrid search to obtain rich information related to entity
@@ -292,11 +347,7 @@ class OasisProfileGenerator:
 
         entity_name = entity.name
 
-        results = {
-            "facts": [],
-            "node_summaries": [],
-            "context": ""
-        }
+        results = {"facts": [], "node_summaries": [], "context": ""}
 
         if not self.graph_id:
             logger.debug(f"Skip knowledge graph search: graph_id not set")
@@ -310,13 +361,13 @@ class OasisProfileGenerator:
                 graph_id=self.graph_id,
                 query=comprehensive_query,
                 limit=30,
-                scope="edges"
+                scope="edges",
             )
 
             all_facts = set()
-            if isinstance(edge_results, dict) and 'edges' in edge_results:
-                for edge in edge_results['edges']:
-                    fact = edge.get('fact', '')
+            if isinstance(edge_results, dict) and "edges" in edge_results:
+                for edge in edge_results["edges"]:
+                    fact = edge.get("fact", "")
                     if fact:
                         all_facts.add(fact)
             results["facts"] = list(all_facts)
@@ -326,16 +377,16 @@ class OasisProfileGenerator:
                 graph_id=self.graph_id,
                 query=comprehensive_query,
                 limit=20,
-                scope="nodes"
+                scope="nodes",
             )
 
             all_summaries = set()
-            if isinstance(node_results, dict) and 'nodes' in node_results:
-                for node in node_results['nodes']:
-                    summary = node.get('summary', '')
+            if isinstance(node_results, dict) and "nodes" in node_results:
+                for node in node_results["nodes"]:
+                    summary = node.get("summary", "")
                     if summary:
                         all_summaries.add(summary)
-                    name = node.get('name', '')
+                    name = node.get("name", "")
                     if name and name != entity_name:
                         all_summaries.add(f"Related Entity: {name}")
             results["node_summaries"] = list(all_summaries)
@@ -343,18 +394,26 @@ class OasisProfileGenerator:
             # Build combined context
             context_parts = []
             if results["facts"]:
-                context_parts.append("Fact Information:\n" + "\n".join(f"- {f}" for f in results["facts"][:20]))
+                context_parts.append(
+                    "Fact Information:\n"
+                    + "\n".join(f"- {f}" for f in results["facts"][:20])
+                )
             if results["node_summaries"]:
-                context_parts.append("Related Entities:\n" + "\n".join(f"- {s}" for s in results["node_summaries"][:10]))
+                context_parts.append(
+                    "Related Entities:\n"
+                    + "\n".join(f"- {s}" for s in results["node_summaries"][:10])
+                )
             results["context"] = "\n\n".join(context_parts)
 
-            logger.info(f"Knowledge graph hybrid search completed: {entity_name}, retrieved {len(results['facts'])} facts, {len(results['node_summaries'])} related nodes")
+            logger.info(
+                f"Knowledge graph hybrid search completed: {entity_name}, retrieved {len(results['facts'])} facts, {len(results['node_summaries'])} related nodes"
+            )
 
         except Exception as e:
             logger.warning(f"Knowledge graph search failed ({entity_name}): {e}")
 
         return results
-    
+
     def _build_entity_context(self, entity: EntityNode) -> str:
         """
         Build complete context information for entity
@@ -389,12 +448,18 @@ class OasisProfileGenerator:
                     existing_facts.add(fact)
                 elif edge_name:
                     if direction == "outgoing":
-                        relationships.append(f"- {entity.name} --[{edge_name}]--> (Related Entity)")
+                        relationships.append(
+                            f"- {entity.name} --[{edge_name}]--> (Related Entity)"
+                        )
                     else:
-                        relationships.append(f"- (Related Entity) --[{edge_name}]--> {entity.name}")
+                        relationships.append(
+                            f"- (Related Entity) --[{edge_name}]--> {entity.name}"
+                        )
 
             if relationships:
-                context_parts.append("### Related Facts and Relationships\n" + "\n".join(relationships))
+                context_parts.append(
+                    "### Related Facts and Relationships\n" + "\n".join(relationships)
+                )
 
         # 3. Add detailed information of related nodes
         if entity.related_nodes:
@@ -414,7 +479,9 @@ class OasisProfileGenerator:
                     related_info.append(f"- **{node_name}**{label_str}")
 
             if related_info:
-                context_parts.append("### Related Entity Information\n" + "\n".join(related_info))
+                context_parts.append(
+                    "### Related Entity Information\n" + "\n".join(related_info)
+                )
 
         # 4. Use knowledge graph hybrid search to get richer information
         graph_results = self._search_graph_for_entity(entity)
@@ -423,13 +490,19 @@ class OasisProfileGenerator:
             # Deduplication: exclude existing facts
             new_facts = [f for f in graph_results["facts"] if f not in existing_facts]
             if new_facts:
-                context_parts.append("### Facts Retrieved from Knowledge Graph\n" + "\n".join(f"- {f}" for f in new_facts[:15]))
+                context_parts.append(
+                    "### Facts Retrieved from Knowledge Graph\n"
+                    + "\n".join(f"- {f}" for f in new_facts[:15])
+                )
 
         if graph_results.get("node_summaries"):
-            context_parts.append("### Related Nodes Retrieved from Knowledge Graph\n" + "\n".join(f"- {s}" for s in graph_results["node_summaries"][:10]))
-        
+            context_parts.append(
+                "### Related Nodes Retrieved from Knowledge Graph\n"
+                + "\n".join(f"- {s}" for s in graph_results["node_summaries"][:10])
+            )
+
         return "\n\n".join(context_parts)
-    
+
     def _is_individual_entity(self, entity_type: str) -> bool:
         """Determine if entity is an individual type"""
         return entity_type.lower() in self.INDIVIDUAL_ENTITY_TYPES
@@ -437,14 +510,14 @@ class OasisProfileGenerator:
     def _is_group_entity(self, entity_type: str) -> bool:
         """Determine if entity is a group/institutional type"""
         return entity_type.lower() in self.GROUP_ENTITY_TYPES
-    
+
     def _generate_profile_with_llm(
         self,
         entity_name: str,
         entity_type: str,
         entity_summary: str,
         entity_attributes: Dict[str, Any],
-        context: str
+        context: str,
     ) -> Dict[str, Any]:
         """
         Use LLM to generate very detailed persona
@@ -471,59 +544,51 @@ class OasisProfileGenerator:
 
         for attempt in range(max_attempts):
             try:
-                response = self.client.chat.completions.create(
-                    model=self.model_name,
-                    messages=[
-                        {"role": "system", "content": self._get_system_prompt(is_individual)},
-                        {"role": "user", "content": prompt}
-                    ],
-                    response_format={"type": "json_object"},
-                    temperature=0.7 - (attempt * 0.1)  # Lower temperature with each retry
-                    # Don't set max_tokens, let LLM generate freely
+                messages = [
+                    {
+                        "role": "system",
+                        "content": self._get_system_prompt(is_individual),
+                    },
+                    {"role": "user", "content": prompt},
+                ]
+                # 8192 output tokens: enough for a 2000-word persona with JSON overhead.
+                # LLMClient routes to native Ollama /api/chat with think:false.
+                result = self.llm.chat_json(
+                    messages=messages,
+                    temperature=0.7 - (attempt * 0.1),
+                    max_tokens=8192,
                 )
 
-                content = response.choices[0].message.content
+                # Validate required fields
+                if "bio" not in result or not result["bio"]:
+                    result["bio"] = (
+                        entity_summary[:200]
+                        if entity_summary
+                        else f"{entity_type}: {entity_name}"
+                    )
+                if "persona" not in result or not result["persona"]:
+                    result["persona"] = (
+                        entity_summary or f"{entity_name} is a {entity_type}."
+                    )
 
-                # Check if output was truncated (finish_reason is not 'stop')
-                finish_reason = response.choices[0].finish_reason
-                if finish_reason == 'length':
-                    logger.warning(f"LLM output truncated (attempt {attempt+1}), attempting to fix...")
-                    content = self._fix_truncated_json(content)
-
-                # Try to parse JSON
-                try:
-                    result = json.loads(content)
-
-                    # Validate required fields
-                    if "bio" not in result or not result["bio"]:
-                        result["bio"] = entity_summary[:200] if entity_summary else f"{entity_type}: {entity_name}"
-                    if "persona" not in result or not result["persona"]:
-                        result["persona"] = entity_summary or f"{entity_name} is a {entity_type}."
-
-                    return result
-
-                except json.JSONDecodeError as je:
-                    logger.warning(f"JSON parsing failed (attempt {attempt+1}): {str(je)[:80]}")
-
-                    # Try to fix JSON
-                    result = self._try_fix_json(content, entity_name, entity_type, entity_summary)
-                    if result.get("_fixed"):
-                        del result["_fixed"]
-                        return result
-
-                    last_error = je
+                return result
 
             except Exception as e:
-                logger.warning(f"LLM call failed (attempt {attempt+1}): {str(e)[:80]}")
+                logger.warning(
+                    f"LLM call failed (attempt {attempt + 1}): {str(e)[:80]}"
+                )
                 last_error = e
                 import time
+
                 time.sleep(1 * (attempt + 1))  # Exponential backoff
 
-        logger.warning(f"LLM persona generation failed ({max_attempts} attempts): {last_error}, using rule-based generation")
+        logger.warning(
+            f"LLM persona generation failed ({max_attempts} attempts): {last_error}, using rule-based generation"
+        )
         return self._generate_profile_rule_based(
             entity_name, entity_type, entity_summary, entity_attributes
         )
-    
+
     def _fix_truncated_json(self, content: str) -> str:
         """Fix truncated JSON (output truncated by max_tokens limit)"""
         import re
@@ -532,8 +597,8 @@ class OasisProfileGenerator:
         content = content.strip()
 
         # Count unclosed parentheses
-        open_braces = content.count('{') - content.count('}')
-        open_brackets = content.count('[') - content.count(']')
+        open_braces = content.count("{") - content.count("}")
+        open_brackets = content.count("[") - content.count("]")
 
         # Check for unclosed strings
         # Simple check: if last character is not comma or closing bracket, string might be truncated
@@ -542,12 +607,14 @@ class OasisProfileGenerator:
             content += '"'
 
         # Close parentheses
-        content += ']' * open_brackets
-        content += '}' * open_braces
+        content += "]" * open_brackets
+        content += "}" * open_braces
 
         return content
-    
-    def _try_fix_json(self, content: str, entity_name: str, entity_type: str, entity_summary: str = "") -> Dict[str, Any]:
+
+    def _try_fix_json(
+        self, content: str, entity_name: str, entity_type: str, entity_summary: str = ""
+    ) -> Dict[str, Any]:
         """Try to fix corrupted JSON"""
         import re
 
@@ -555,7 +622,7 @@ class OasisProfileGenerator:
         content = self._fix_truncated_json(content)
 
         # 2. Try to extract JSON portion
-        json_match = re.search(r'\{[\s\S]*\}', content)
+        json_match = re.search(r"\{[\s\S]*\}", content)
         if json_match:
             json_str = json_match.group()
 
@@ -564,13 +631,15 @@ class OasisProfileGenerator:
             def fix_string_newlines(match):
                 s = match.group(0)
                 # Replace actual newlines in string with spaces
-                s = s.replace('\n', ' ').replace('\r', ' ')
+                s = s.replace("\n", " ").replace("\r", " ")
                 # Replace excess spaces
-                s = re.sub(r'\s+', ' ', s)
+                s = re.sub(r"\s+", " ", s)
                 return s
 
             # Match JSON string values
-            json_str = re.sub(r'"[^"\\]*(?:\\.[^"\\]*)*"', fix_string_newlines, json_str)
+            json_str = re.sub(
+                r'"[^"\\]*(?:\\.[^"\\]*)*"', fix_string_newlines, json_str
+            )
 
             # 4. Try to parse
             try:
@@ -581,9 +650,9 @@ class OasisProfileGenerator:
                 # 5. If still failed, try more aggressive fix
                 try:
                     # Remove all control characters
-                    json_str = re.sub(r'[\x00-\x1f\x7f-\x9f]', ' ', json_str)
+                    json_str = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", json_str)
                     # Replace all consecutive whitespace
-                    json_str = re.sub(r'\s+', ' ', json_str)
+                    json_str = re.sub(r"\s+", " ", json_str)
                     result = json.loads(json_str)
                     result["_fixed"] = True
                     return result
@@ -592,43 +661,59 @@ class OasisProfileGenerator:
 
         # 6. Try to extract partial information from content
         bio_match = re.search(r'"bio"\s*:\s*"([^"]*)"', content)
-        persona_match = re.search(r'"persona"\s*:\s*"([^"]*)', content)  # May be truncated
+        persona_match = re.search(
+            r'"persona"\s*:\s*"([^"]*)', content
+        )  # May be truncated
 
-        bio = bio_match.group(1) if bio_match else (entity_summary[:200] if entity_summary else f"{entity_type}: {entity_name}")
-        persona = persona_match.group(1) if persona_match else (entity_summary or f"{entity_name} is a {entity_type}.")
+        bio = (
+            bio_match.group(1)
+            if bio_match
+            else (
+                entity_summary[:200]
+                if entity_summary
+                else f"{entity_type}: {entity_name}"
+            )
+        )
+        persona = (
+            persona_match.group(1)
+            if persona_match
+            else (entity_summary or f"{entity_name} is a {entity_type}.")
+        )
 
         # If extracted meaningful content, mark as fixed
         if bio_match or persona_match:
             logger.info(f"Extracted partial information from corrupted JSON")
-            return {
-                "bio": bio,
-                "persona": persona,
-                "_fixed": True
-            }
+            return {"bio": bio, "persona": persona, "_fixed": True}
 
         # 7. Complete failure, return basic structure
         logger.warning(f"JSON fix failed, returning basic structure")
         return {
-            "bio": entity_summary[:200] if entity_summary else f"{entity_type}: {entity_name}",
-            "persona": entity_summary or f"{entity_name} is a {entity_type}."
+            "bio": entity_summary[:200]
+            if entity_summary
+            else f"{entity_type}: {entity_name}",
+            "persona": entity_summary or f"{entity_name} is a {entity_type}.",
         }
-    
+
     def _get_system_prompt(self, is_individual: bool) -> str:
         """Get system prompt"""
         base_prompt = "You are an expert in generating social media user profiles. Generate detailed, realistic personas for opinion simulation that maximize restoration of existing reality. Must return valid JSON format with all string values containing no unescaped newlines. Use English."
         return base_prompt
-    
+
     def _build_individual_persona_prompt(
         self,
         entity_name: str,
         entity_type: str,
         entity_summary: str,
         entity_attributes: Dict[str, Any],
-        context: str
+        context: str,
     ) -> str:
         """Build detailed persona prompt for individual entities"""
 
-        attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "None"
+        attrs_str = (
+            json.dumps(entity_attributes, ensure_ascii=False)
+            if entity_attributes
+            else "None"
+        )
         context_str = context[:3000] if context else "No additional context"
 
         return f"""Generate a detailed social media user persona for the entity, maximizing restoration of existing reality.
@@ -673,11 +758,15 @@ Important:
         entity_type: str,
         entity_summary: str,
         entity_attributes: Dict[str, Any],
-        context: str
+        context: str,
     ) -> str:
         """Build detailed persona prompt for group/institutional entities"""
 
-        attrs_str = json.dumps(entity_attributes, ensure_ascii=False) if entity_attributes else "None"
+        attrs_str = (
+            json.dumps(entity_attributes, ensure_ascii=False)
+            if entity_attributes
+            else "None"
+        )
         context_str = context[:3000] if context else "No additional context"
 
         return f"""Generate detailed social media account profile for institutional/group entity, maximizing restoration of existing reality.
@@ -714,13 +803,13 @@ Important:
 - Use English
 - age must be integer 30, gender must be string "other"
 - Institutional account speech must match its identity positioning"""
-    
+
     def _generate_profile_rule_based(
         self,
         entity_name: str,
         entity_type: str,
         entity_summary: str,
-        entity_attributes: Dict[str, Any]
+        entity_attributes: Dict[str, Any],
     ) -> Dict[str, Any]:
         """Generate basic persona using rules"""
 
@@ -760,10 +849,19 @@ Important:
                 "mbti": "ISTJ",  # Institutional style: rigorous conservative
                 "country": "US",
                 "profession": "Media",
-                "interested_topics": ["General News", "Current Events", "Public Affairs"],
+                "interested_topics": [
+                    "General News",
+                    "Current Events",
+                    "Public Affairs",
+                ],
             }
 
-        elif entity_type_lower in ["university", "governmentagency", "ngo", "organization"]:
+        elif entity_type_lower in [
+            "university",
+            "governmentagency",
+            "ngo",
+            "organization",
+        ]:
             return {
                 "bio": f"Official account of {entity_name}.",
                 "persona": f"{entity_name} is an institutional entity that communicates official positions, announcements, and engages with stakeholders on relevant matters.",
@@ -772,14 +870,21 @@ Important:
                 "mbti": "ISTJ",  # Institutional style: rigorous conservative
                 "country": "US",
                 "profession": entity_type,
-                "interested_topics": ["Public Policy", "Community", "Official Announcements"],
+                "interested_topics": [
+                    "Public Policy",
+                    "Community",
+                    "Official Announcements",
+                ],
             }
 
         else:
             # Default persona
             return {
-                "bio": entity_summary[:150] if entity_summary else f"{entity_type}: {entity_name}",
-                "persona": entity_summary or f"{entity_name} is a {entity_type.lower()} participating in social discussions.",
+                "bio": entity_summary[:150]
+                if entity_summary
+                else f"{entity_type}: {entity_name}",
+                "persona": entity_summary
+                or f"{entity_name} is a {entity_type.lower()} participating in social discussions.",
                 "age": random.randint(25, 50),
                 "gender": random.choice(["male", "female"]),
                 "mbti": random.choice(self.MBTI_TYPES),
@@ -787,11 +892,11 @@ Important:
                 "profession": entity_type,
                 "interested_topics": ["General", "Social Issues"],
             }
-    
+
     def set_graph_id(self, graph_id: str):
         """Set knowledge graph ID for knowledge graph search"""
         self.graph_id = graph_id
-    
+
     def generate_profiles_from_entities(
         self,
         entities: List[EntityNode],
@@ -800,7 +905,7 @@ Important:
         graph_id: Optional[str] = None,
         parallel_count: int = 5,
         realtime_output_path: Optional[str] = None,
-        output_platform: str = "reddit"
+        output_platform: str = "reddit",
     ) -> List[OasisAgentProfile]:
         """
         Generate Agent Profiles in batch from entities (supports parallel generation)
@@ -819,7 +924,7 @@ Important:
         """
         import concurrent.futures
         from threading import Lock
-        
+
         # Set graph_id for knowledge graph search
         if graph_id:
             self.graph_id = graph_id
@@ -844,31 +949,36 @@ Important:
                 try:
                     if output_platform == "reddit":
                         # Reddit JSON format
-                        profiles_data = [p.to_reddit_format() for p in existing_profiles]
-                        with open(realtime_output_path, 'w', encoding='utf-8') as f:
+                        profiles_data = [
+                            p.to_reddit_format() for p in existing_profiles
+                        ]
+                        with open(realtime_output_path, "w", encoding="utf-8") as f:
                             json.dump(profiles_data, f, ensure_ascii=False, indent=2)
                     else:
                         # Twitter CSV format
                         import csv
-                        profiles_data = [p.to_twitter_format() for p in existing_profiles]
+
+                        profiles_data = [
+                            p.to_twitter_format() for p in existing_profiles
+                        ]
                         if profiles_data:
                             fieldnames = list(profiles_data[0].keys())
-                            with open(realtime_output_path, 'w', encoding='utf-8', newline='') as f:
+                            with open(
+                                realtime_output_path, "w", encoding="utf-8", newline=""
+                            ) as f:
                                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                                 writer.writeheader()
                                 writer.writerows(profiles_data)
                 except Exception as e:
                     logger.warning(f"Real-time profile save failed: {e}")
-        
+
         def generate_single_profile(idx: int, entity: EntityNode) -> tuple:
             """Worker function to generate single profile"""
             entity_type = entity.get_entity_type() or "Entity"
 
             try:
                 profile = self.generate_profile_from_entity(
-                    entity=entity,
-                    user_id=idx,
-                    use_llm=use_llm
+                    entity=entity, user_id=idx, use_llm=use_llm
                 )
 
                 # Real-time output generated persona to console and log
@@ -877,7 +987,9 @@ Important:
                 return idx, profile, None
 
             except Exception as e:
-                logger.error(f"Failed to generate persona for entity {entity.name}: {str(e)}")
+                logger.error(
+                    f"Failed to generate persona for entity {entity.name}: {str(e)}"
+                )
                 # Create a fallback profile
                 fallback_profile = OasisAgentProfile(
                     user_id=idx,
@@ -890,13 +1002,19 @@ Important:
                 )
                 return idx, fallback_profile, str(e)
 
-        logger.info(f"Starting parallel generation of {total} agent personas (parallel count: {parallel_count})...")
-        print(f"\n{'='*60}")
-        print(f"Starting agent persona generation - {total} entities total, parallel count: {parallel_count}")
-        print(f"{'='*60}\n")
-        
+        logger.info(
+            f"Starting parallel generation of {total} agent personas (parallel count: {parallel_count})..."
+        )
+        print(f"\n{'=' * 60}")
+        print(
+            f"Starting agent persona generation - {total} entities total, parallel count: {parallel_count}"
+        )
+        print(f"{'=' * 60}\n")
+
         # Use thread pool for parallel execution
-        with concurrent.futures.ThreadPoolExecutor(max_workers=parallel_count) as executor:
+        with concurrent.futures.ThreadPoolExecutor(
+            max_workers=parallel_count
+        ) as executor:
             # Submit all tasks
             future_to_entity = {
                 executor.submit(generate_single_profile, idx, entity): (idx, entity)
@@ -923,16 +1041,22 @@ Important:
                         progress_callback(
                             current,
                             total,
-                            f"Completed {current}/{total}: {entity.name} ({entity_type})"
+                            f"Completed {current}/{total}: {entity.name} ({entity_type})",
                         )
 
                     if error:
-                        logger.warning(f"[{current}/{total}] {entity.name} using fallback persona: {error}")
+                        logger.warning(
+                            f"[{current}/{total}] {entity.name} using fallback persona: {error}"
+                        )
                     else:
-                        logger.info(f"[{current}/{total}] Successfully generated persona: {entity.name} ({entity_type})")
+                        logger.info(
+                            f"[{current}/{total}] Successfully generated persona: {entity.name} ({entity_type})"
+                        )
 
                 except Exception as e:
-                    logger.error(f"Exception occurred while processing entity {entity.name}: {str(e)}")
+                    logger.error(
+                        f"Exception occurred while processing entity {entity.name}: {str(e)}"
+                    )
                     with lock:
                         completed_count[0] += 1
                     profiles[idx] = OasisAgentProfile(
@@ -940,25 +1064,34 @@ Important:
                         user_name=self._generate_username(entity.name),
                         name=entity.name,
                         bio=f"{entity_type}: {entity.name}",
-                        persona=entity.summary or "A participant in social discussions.",
+                        persona=entity.summary
+                        or "A participant in social discussions.",
                         source_entity_uuid=entity.uuid,
                         source_entity_type=entity_type,
                     )
                     # Real-time file writing (even for fallback personas)
                     save_profiles_realtime()
 
-        print(f"\n{'='*60}")
-        print(f"Persona generation complete! Generated {len([p for p in profiles if p])} agents")
-        print(f"{'='*60}\n")
-        
+        print(f"\n{'=' * 60}")
+        print(
+            f"Persona generation complete! Generated {len([p for p in profiles if p])} agents"
+        )
+        print(f"{'=' * 60}\n")
+
         return profiles
-    
-    def _print_generated_profile(self, entity_name: str, entity_type: str, profile: OasisAgentProfile):
+
+    def _print_generated_profile(
+        self, entity_name: str, entity_type: str, profile: OasisAgentProfile
+    ):
         """Real-time output generated persona to console (complete content, not truncated)"""
         separator = "-" * 70
 
         # Build complete output content (not truncated)
-        topics_str = ', '.join(profile.interested_topics) if profile.interested_topics else 'None'
+        topics_str = (
+            ", ".join(profile.interested_topics)
+            if profile.interested_topics
+            else "None"
+        )
 
         output_lines = [
             f"\n{separator}",
@@ -976,19 +1109,19 @@ Important:
             f"Age: {profile.age} | Gender: {profile.gender} | MBTI: {profile.mbti}",
             f"Profession: {profile.profession} | Country: {profile.country}",
             f"Interested Topics: {topics_str}",
-            separator
+            separator,
         ]
 
         output = "\n".join(output_lines)
 
         # Only output to console (avoid duplication, logger no longer outputs complete content)
         print(output)
-    
+
     def save_profiles(
         self,
         profiles: List[OasisAgentProfile],
         file_path: str,
-        platform: str = "reddit"
+        platform: str = "reddit",
     ):
         """
         Save profiles to file (choose correct format based on platform)
@@ -1006,7 +1139,7 @@ Important:
             self._save_twitter_csv(profiles, file_path)
         else:
             self._save_reddit_json(profiles, file_path)
-    
+
     def _save_twitter_csv(self, profiles: List[OasisAgentProfile], file_path: str):
         """
         Save Twitter Profile as CSV format (compliant with OASIS official requirements)
@@ -1025,14 +1158,14 @@ Important:
         import csv
 
         # Ensure file extension is .csv
-        if not file_path.endswith('.csv'):
-            file_path = file_path.replace('.json', '.csv')
+        if not file_path.endswith(".csv"):
+            file_path = file_path.replace(".json", ".csv")
 
-        with open(file_path, 'w', newline='', encoding='utf-8') as f:
+        with open(file_path, "w", newline="", encoding="utf-8") as f:
             writer = csv.writer(f)
 
             # Write OASIS required header
-            headers = ['user_id', 'name', 'username', 'user_char', 'description']
+            headers = ["user_id", "name", "username", "user_char", "description"]
             writer.writerow(headers)
 
             # Write data rows
@@ -1042,22 +1175,24 @@ Important:
                 if profile.persona and profile.persona != profile.bio:
                     user_char = f"{profile.bio} {profile.persona}"
                 # Handle newlines (replace with space in CSV)
-                user_char = user_char.replace('\n', ' ').replace('\r', ' ')
+                user_char = user_char.replace("\n", " ").replace("\r", " ")
 
                 # description: Short bio for external display
-                description = profile.bio.replace('\n', ' ').replace('\r', ' ')
+                description = profile.bio.replace("\n", " ").replace("\r", " ")
 
                 row = [
-                    idx,                    # user_id: Sequential ID starting from 0
-                    profile.name,           # name: Real name
-                    profile.user_name,      # username: Username
-                    user_char,              # user_char: Complete persona (internal LLM use)
-                    description             # description: Short bio (external display)
+                    idx,  # user_id: Sequential ID starting from 0
+                    profile.name,  # name: Real name
+                    profile.user_name,  # username: Username
+                    user_char,  # user_char: Complete persona (internal LLM use)
+                    description,  # description: Short bio (external display)
                 ]
                 writer.writerow(row)
 
-        logger.info(f"Saved {len(profiles)} Twitter profiles to {file_path} (OASIS CSV format)")
-    
+        logger.info(
+            f"Saved {len(profiles)} Twitter profiles to {file_path} (OASIS CSV format)"
+        )
+
     def _normalize_gender(self, gender: Optional[str]) -> str:
         """
         Normalize gender field to OASIS required English format
@@ -1077,7 +1212,7 @@ Important:
         }
 
         return gender_map.get(gender_lower, "other")
-    
+
     def _save_reddit_json(self, profiles: List[OasisAgentProfile], file_path: str):
         """
         Save Reddit Profile as JSON format
@@ -1100,11 +1235,14 @@ Important:
         for idx, profile in enumerate(profiles):
             # Use format consistent with to_reddit_format()
             item = {
-                "user_id": profile.user_id if profile.user_id is not None else idx,  # Key: must include user_id
+                "user_id": profile.user_id
+                if profile.user_id is not None
+                else idx,  # Key: must include user_id
                 "username": profile.user_name,
                 "name": profile.name,
                 "bio": profile.bio[:150] if profile.bio else f"{profile.name}",
-                "persona": profile.persona or f"{profile.name} is a participant in social discussions.",
+                "persona": profile.persona
+                or f"{profile.name} is a participant in social discussions.",
                 "karma": profile.karma if profile.karma else 1000,
                 "created_at": profile.created_at,
                 # OASIS required fields - ensure all have defaults
@@ -1122,19 +1260,22 @@ Important:
 
             data.append(item)
 
-        with open(file_path, 'w', encoding='utf-8') as f:
+        with open(file_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
-        logger.info(f"Saved {len(profiles)} Reddit profiles to {file_path} (JSON format, includes user_id field)")
-    
+        logger.info(
+            f"Saved {len(profiles)} Reddit profiles to {file_path} (JSON format, includes user_id field)"
+        )
+
     # Keep old method name as alias for backward compatibility
     def save_profiles_to_json(
         self,
         profiles: List[OasisAgentProfile],
         file_path: str,
-        platform: str = "reddit"
+        platform: str = "reddit",
     ):
         """[Deprecated] Please use save_profiles() method"""
-        logger.warning("save_profiles_to_json is deprecated, please use save_profiles method")
+        logger.warning(
+            "save_profiles_to_json is deprecated, please use save_profiles method"
+        )
         self.save_profiles(profiles, file_path, platform)
-
